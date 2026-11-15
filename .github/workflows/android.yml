@@ -1,26 +1,64 @@
-name: Android CI
+name: Build Android APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main, master]
   pull_request:
-    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-
+  build-apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
-    - uses: actions/checkout@v4
-    - name: set up JDK 11
-      uses: actions/setup-java@v4
-      with:
-        java-version: '11'
-        distribution: 'temurin'
-        cache: gradle
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-    - name: Build with Gradle
-      run: ./gradlew build
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Verify repository project root
+        run: |
+          test -f settings.gradle
+          test -f app/build.gradle
+          test -f tools/validate_exams.py
+
+      - name: Validate all 1300 questions and assets
+        run: python3 tools/validate_exams.py
+
+      - name: Test answer locking and grading logic
+        run: |
+          mkdir -p logic-test-classes
+          javac -encoding UTF-8 -d logic-test-classes app/src/main/java/com/ehliyet/deneme/ExamLogic.java tools/ExamLogicTest.java
+          java -cp logic-test-classes com.ehliyet.deneme.ExamLogicTest
+
+      - name: Build installable APK
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Check APK exists
+        run: test -s app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ehliyet-Deneme-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
